@@ -1,0 +1,104 @@
+name: AWS Deploy
+
+on:
+  workflow_call:
+    inputs:
+      AWS_ACCOUNT_ID:
+        required: true
+        description: 'AWS Account ID'
+      AWS_REGION:
+        required: true
+        description: 'AWS Region'
+      LAMBDA_NAME:
+        required: true
+        description: 'Name of the Lambda function'
+      ECR_REPOSITORY:
+        required: true
+        description: 'ECR repository name'
+      DOCKERFILE:
+        required: false
+        description: 'Path to the Dockerfile'
+        default: Dockerfile
+      BUILD_CONTEXT:
+        required: false
+        description: 'Docker build context'
+        default: "."
+      BUILD_OPT:
+        required: false
+        description: 'Path to the environment file'
+        default: ""
+      IMAGE_TAG:
+        required: false
+        description: 'image tag'
+        default: ${{ github.sha }}      
+      
+
+env:
+  ECR_REPOSITORY_URI: ${{ inputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ inputs.AWS_REGION }}.amazonaws.com/${{ inputs.ECR_REPOSITORY }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: read
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        id: configure-aws-credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::${{ inputs.AWS_ACCOUNT_ID }}:role/${{ inputs.LAMBDA_NAME }}-github-role
+          aws-region: ${{ inputs.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        run: |
+          aws ecr get-login-password --region ${{ inputs.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ECR_REPOSITORY_URI }}
+
+      - name: Build Docker image
+        run: |
+          docker build ${{ inputs.BUILD_OPT }} -t ${{ env.ECR_REPOSITORY_URI }}:${{ env.IMAGE_TAG }} -f ${{ inputs.DOCKERFILE }} ${{ inputs.BUILD_CONTEXT }}
+
+      - name: Push Docker image to ECR
+        run: |
+          docker tag ${{ env.ECR_REPOSITORY_URI }}:${{ env.IMAGE_TAG }} ${{ env.ECR_REPOSITORY_URI }}:latest
+          docker push ${{ env.ECR_REPOSITORY_URI }}:${{ env.IMAGE_TAG }}
+          docker push ${{ env.ECR_REPOSITORY_URI }}:latest
+
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: read
+    needs: build-and-push
+    steps:
+      - name: Configure AWS Credentials
+        id: configure-aws-credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::${{ inputs.AWS_ACCOUNT_ID }}:role/${{ inputs.LAMBDA_NAME }}-github-role
+          aws-region: ${{ inputs.AWS_REGION }}
+
+      - name: Invoke Lambda
+        run: |
+          aws lambda invoke \
+            --cli-binary-format raw-in-base64-out \
+            --region ${{ inputs.AWS_REGION }} \
+            --function-name ${{ inputs.LAMBDA_NAME }} \
+            --payload '{"imageName": "'"${{ env.ECR_REPOSITORY_URI }}:${{ env.IMAGE_TAG }}"'"}' \
+            response.json
+
+          statusCode=$(jq '.statusCode' response.json)
+          message=$(jq -r '.body | fromjson | .error' response.json)
+
+          if [ "$statusCode" -ne 200 ]; then
+            echo "Error: Lambda function failed with status code $statusCode"
+            [ -n "$message" ] && [ "$message" != "null" ] && echo "Error message: $message"
+            exit 1
+          else
+            echo "Lambda function succeeded."
+            exit 0
+          fi
