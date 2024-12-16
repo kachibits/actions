@@ -1,0 +1,159 @@
+name: compose deploy
+
+on:
+  workflow_call:
+    inputs:
+      DOCKERFILE:
+        required: false
+        default: Dockerfile
+        type: string
+
+      BUILD_CONTEXT:
+        required: false
+        default: "."
+        type: string
+
+      BUILD_OPT:
+        required: false
+        default: ""
+        type: string
+
+      IMAGE_NAME:
+        required: false
+        default: "ghcr.io/${{ github.repository }}"
+        type: string
+
+      IMAGE_TAG:
+        required: false
+        default: "${{ github.sha }}"
+        type: string
+
+      DOT_ENV:
+        required: false
+        default: ""
+        type: string
+
+      COMPOSE_FILE:
+        required: false
+        default: "compose.yml"
+        type: string
+        
+      CR_NAME:
+        required: false
+        default: "ghcr.io"
+        type: string
+
+      CR_USERNAME:
+        required: false
+        default: "${{ github.repository_owner }}"
+        type: string
+
+      CR_PASSWORD:
+        required: true
+        type: string
+        description: "container registry password, for ghcr you can use  secrets.GITHUB_TOKEN"
+
+      DEPLOY_HOST:
+        required: true
+        type: string
+
+      DEPLOY_PORT:
+        required: false
+        type: number
+        default: 22
+
+      DEPLOY_USERNAME:
+        required: true
+        type: string
+
+      DEPLOY_KEY:
+        required: true
+        type: string
+
+      DEPLOY_DIR:
+        required: false
+        type: string
+        default: "/$HOME/apps"
+        
+      APP_NAME:
+        required: true
+        type: string 
+
+jobs:
+  build-image:
+    runs-on: self-hosted
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to  Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ inputs.CR_NAME }}
+          username: ${{ inputs.CR_USERNAME }}
+          password: ${{ inputs.CR_PASSWORD }}
+
+      - name: Build Docker image
+        run: |
+          docker build ${{ inputs.BUILD_OPT }} -t ${{ inputs.IMAGE_NAME }}:${{ inputs.IMAGE_TAG }} -f ${{ inputs.DOCKERFILE }} ${{ inputs.BUILD_CONTEXT }}
+
+      - name: Push Docker image to CR
+        run: |
+          docker tag ${{ inputs.IMAGE_NAME }}:${{ inputs.IMAGE_TAG }} ${{ inputs.IMAGE_NAME }}:latest
+          docker push ${{ inputs.IMAGE_NAME }}:${{ inputs.IMAGE_TAG }}
+          docker push ${{ inputs.IMAGE_NAME }}:latest
+
+
+  deploy:
+    needs: build-image
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            ${{ inputs.COMPOSE_FILE }}
+          sparse-checkout-cone-mode: false
+
+      - name: Add compose vars to .env
+        run: |
+          echo 'IMAGE=${{ inputs.IMAGE_NAME }}:${{ inputs.IMAGE_TAG }}' >> ./.env
+          echo '${{ inputs.DOT_ENV }}' >> ./.env
+
+      - name: Transfer deployment files to target server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ inputs.DEPLOY_HOST }}
+          username: ${{ inputs.DEPLOY_USERNAME }}
+          key: ${{ inputs.DEPLOY_KEY }}
+          port: ${{ inputs.DEPLOY_PORT }}
+          source: "${{ inputs.COMPOSE_FILE}},.env"
+          target: /tmp/deployment-files-${{ inputs.APP_NAME }}
+          rm: true
+
+      - name: Run deployment script on target server
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ inputs.DEPLOY_HOST }}
+          username: ${{ inputs.DEPLOY_USERNAME }}
+          key: ${{ inputs.DEPLOY_KEY }}
+          port: ${{ inputs.DEPLOY_PORT }}
+          script: |
+            set -e
+            export \
+              DEPLOYMENT_DIR="${{inputs.DEPLOY_DIR}}/${{ inputs.APP_NAME }}" \
+              BACKUP_DIR="${{inputs.DEPLOY_DIR}}/${{ inputs.APP_NAME }}-backups/$(date +%s)"
+            mkdir -p $DEPLOYMENT_DIR
+            if [ "$(ls -A $DEPLOYMENT_DIR)" ]; then
+              mkdir -p $BACKUP_DIR
+              mv -T $DEPLOYMENT_DIR $BACKUP_DIR
+            fi
+            mv -T /tmp/deployment-files-${{ inputs.APP_NAME }} $DEPLOYMENT_DIR
+            cd $DEPLOYMENT_DIR
+            mv '${{ inputs.COMPOSE_FILE }}' compose.yml
+            docker login ${{ inputs.CR_NAME }} -u '${{ inputs.CR_USERNAME }}' -p '${{ inputs.CR_PASSWORD }}'
+            docker compose up --wait
