@@ -54,10 +54,7 @@ env:
   ROLE_NAME: arn:aws:iam::${{ inputs.AWS_ACCOUNT_ID }}:role/cs-${{ inputs.PROJECT_NAME }}-${{ inputs.APP_NAME }}-${{ inputs.CLUSTER_NAME }}-github-role
 jobs:
   build-and-push:
-    runs-on: ubuntu-latest
-    container:
-      image: arm64v8/ubuntu:latest
-      options: --platform linux/arm64
+    runs-on: kachibits
     permissions:
       id-token: write
       contents: read
@@ -91,7 +88,7 @@ jobs:
   deploy:
     permissions:
       id-token: write
-    runs-on: ubuntu-latest
+    runs-on: kachibits
     needs: build-and-push
     steps:
       - name: Configure AWS Credentials
