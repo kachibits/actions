@@ -11,14 +11,6 @@ on:
         required: true
         description: 'AWS Region'
         type: string
-      LAMBDA_NAME:
-        required: true
-        description: 'Name of the Lambda function'
-        type: string
-      ECR_REPOSITORY:
-        required: true
-        description: 'ECR repository name'
-        type: string
       DOCKERFILE:
         required: false
         description: 'Path to the Dockerfile'
@@ -35,13 +27,26 @@ on:
         default: ""
         type: string
 
+      APP_NAME:
+        required: true
+        description: 'Name of the application'
+        type: string
+      PROJECT_NAME:
+        required: true
+        description: 'Name of the project(group)'
+        type: string
+      CLUSTER_NAME:
+        required: true
+        description: 'Name of the ecs cluster'
+        type: string
 
       
 
 env:
   IMAGE_TAG: ${{ github.sha }}
-  ECR_REPOSITORY_URI: ${{ inputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ inputs.AWS_REGION }}.amazonaws.com/${{ inputs.ECR_REPOSITORY }}
-
+  ECR_REPOSITORY_URI: ${{ inputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ inputs.AWS_REGION }}.amazonaws.com/${{ inputs.PROJECT_NAME }}/${{ inputs.APP_NAME }}
+  LAMBDA_NAME: ${{ inputs.PROJECT_NAME }}-${{ inputs.APP_NAME }}-${{ inputs.CLUSTER_NAME }}
+  ROLE_NAME: ${{ inputs.PROJECT_NAME }}-${{ inputs.APP_NAME }}-${{ inputs.CLUSTER_NAME }}-github-role
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
@@ -57,7 +62,7 @@ jobs:
         id: configure-aws-credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: arn:aws:iam::${{ inputs.AWS_ACCOUNT_ID }}:role/${{ inputs.LAMBDA_NAME }}-github-role
+          role-to-assume: ${{ env.ROLE_NAME }}
           aws-region: ${{ inputs.AWS_REGION }}
 
       - name: Log in to Amazon ECR
@@ -85,7 +90,7 @@ jobs:
         id: configure-aws-credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: arn:aws:iam::${{ inputs.AWS_ACCOUNT_ID }}:role/${{ inputs.LAMBDA_NAME }}-github-role
+          role-to-assume: ${{ env.ROLE_NAME }}
           aws-region: ${{ inputs.AWS_REGION }}
 
       - name: Invoke Lambda
@@ -93,7 +98,7 @@ jobs:
           aws lambda invoke \
             --cli-binary-format raw-in-base64-out \
             --region ${{ inputs.AWS_REGION }} \
-            --function-name ${{ inputs.LAMBDA_NAME }} \
+            --function-name ${{ env.LAMBDA_NAME }} \
             --payload '{"imageName": "'"${{ env.ECR_REPOSITORY_URI }}:${{ env.IMAGE_TAG }}"'"}' \
             response.json
 
