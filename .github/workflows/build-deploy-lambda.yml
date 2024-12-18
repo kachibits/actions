@@ -45,8 +45,8 @@ on:
 env:
   IMAGE_TAG: ${{ github.sha }}
   ECR_REPOSITORY_URI: ${{ inputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ inputs.AWS_REGION }}.amazonaws.com/${{ inputs.PROJECT_NAME }}/${{ inputs.APP_NAME }}
-  LAMBDA_NAME: ${{ inputs.PROJECT_NAME }}-${{ inputs.APP_NAME }}-${{ inputs.CLUSTER_NAME }}
-  ROLE_NAME: ${{ inputs.PROJECT_NAME }}-${{ inputs.APP_NAME }}-${{ inputs.CLUSTER_NAME }}-github-role
+  LAMBDA_NAME: cs-${{ inputs.PROJECT_NAME }}-${{ inputs.APP_NAME }}-${{ inputs.CLUSTER_NAME }}
+  ROLE_NAME: cs-${{ inputs.PROJECT_NAME }}-${{ inputs.APP_NAME }}-${{ inputs.CLUSTER_NAME }}-github-role
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
