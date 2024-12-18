@@ -47,6 +47,7 @@ on:
       RUNNER:
         required: false
         default: "self-hosted"
+        type: string
 
       
 
