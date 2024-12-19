@@ -94,12 +94,6 @@ jobs:
           -f ${{ inputs.DOCKERFILE }} ${{ inputs.BUILD_CONTEXT }} \
           --push
 
-#      - name: Push Docker image to ECR
-#        run: |
-#          docker tag ${{ env.ECR_REPOSITORY_URI }}:${{ env.IMAGE_TAG }} ${{ env.ECR_REPOSITORY_URI }}:latest
-#          docker push ${{ env.ECR_REPOSITORY_URI }}:${{ env.IMAGE_TAG }}
-#          docker push ${{ env.ECR_REPOSITORY_URI }}:latest
-
   deploy:
     permissions:
       id-token: write
